@@ -1,46 +1,23 @@
-import React, { useState } from 'react';
-import { 
-  Container, 
-  Grid, 
-  Paper, 
-  Typography, 
-  Box, 
-  Button,
-  Avatar,
-  Divider,
-  List,
-  ListItem,
-  ListItemAvatar,
-  ListItemText,
-  Chip,
-  TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Tabs,
-  Tab
+import React, { useState, useEffect } from 'react';
+import {
+  Container, Grid, Paper, Typography, Box, Button,
+  Avatar, Divider, List, ListItem, ListItemAvatar,
+  ListItemText, TextField, Dialog, DialogTitle,
+  DialogContent, DialogActions, Tabs, Tab, Alert,
+  CircularProgress
 } from '@mui/material';
 import {
-  ShoppingCart,
-  Person,
-  Email,
-  CalendarToday,
-  ContactSupport,
-  Edit,
-  History,
-  Lock,
-  PersonAdd
+  ShoppingCart, Person, Email, CalendarToday,
+  ContactSupport, Edit, History, Lock, PersonAdd
 } from '@mui/icons-material';
+import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { db } from '../firebase';
 
-// Mock user database
-const mockUsers = [
-  { email: 'john@example.com', password: 'password123', name: 'John Doe', joinDate: 'April 2024' }
-];
-
+// Quick Action Button Component
 const QuickActionButton = ({ icon, label, ...props }) => (
-  <Button 
-    variant="outlined" 
+  <Button
+    variant="outlined"
     startIcon={icon}
     sx={{ flex: 1, py: 1.5, borderRadius: 2, textTransform: 'none' }}
     {...props}
@@ -54,9 +31,34 @@ export default function Dashboard() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState(0);
   const [formData, setFormData] = useState({ email: '', password: '', name: '' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Initialize Firebase Auth
+  const auth = getAuth();
+
+  // Check auth state on component mount
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        // User is signed in
+        const q = query(collection(db, "users"), where("email", "==", user.email));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          setCurrentUser({
+            id: user.uid,
+            email: user.email,
+            ...querySnapshot.docs[0].data()
+          });
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [auth]);
 
   const handleAuthTabChange = (event, newValue) => {
     setAuthTab(newValue);
+    setError('');
   };
 
   const handleInputChange = (e) => {
@@ -64,36 +66,56 @@ export default function Dashboard() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleLogin = () => {
-    const user = mockUsers.find(u => u.email === formData.email && u.password === formData.password);
-    if (user) {
-      setCurrentUser(user);
+  const handleAuth = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (authTab === 0) {
+        // Login flow
+        const { user } = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        const q = query(collection(db, "users"), where("email", "==", user.email));
+        const querySnapshot = await getDocs(q);
+        
+        setCurrentUser({
+          id: user.uid,
+          email: user.email,
+          ...querySnapshot.docs[0].data()
+        });
+      } else {
+        // Signup flow
+        const { user } = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        await addDoc(collection(db, "users"), {
+          email: user.email,
+          name: formData.name,
+          joinDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          createdAt: new Date()
+        });
+        
+        setCurrentUser({
+          id: user.uid,
+          email: user.email,
+          name: formData.name,
+          joinDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        });
+      }
       setAuthOpen(false);
-    } else {
-      alert('Invalid credentials');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSignup = () => {
-    if (mockUsers.some(u => u.email === formData.email)) {
-      alert('Email already exists');
-      return;
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      setCurrentUser(null);
+    } catch (err) {
+      console.error("Logout error:", err);
     }
-    const newUser = {
-      email: formData.email,
-      password: formData.password,
-      name: formData.name,
-      joinDate: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    };
-    mockUsers.push(newUser);
-    setCurrentUser(newUser);
-    setAuthOpen(false);
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-  };
-
+  // Show auth screen if not logged in
   if (!currentUser) {
     return (
       <Container maxWidth="sm" sx={{ mt: 8, textAlign: 'center' }}>
@@ -103,27 +125,29 @@ export default function Dashboard() {
             Welcome to Our Platform
           </Typography>
           <Typography variant="body1" sx={{ mb: 3 }}>
-            Please log in to access your dashboard
+            Please authenticate to access your dashboard
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-            <Button 
-              variant="contained" 
+            <Button
+              variant="contained"
               size="large"
               startIcon={<Person />}
               onClick={() => {
                 setAuthTab(0);
                 setAuthOpen(true);
+                setError('');
               }}
             >
               Login
             </Button>
-            <Button 
-              variant="outlined" 
+            <Button
+              variant="outlined"
               size="large"
               startIcon={<PersonAdd />}
               onClick={() => {
                 setAuthTab(1);
                 setAuthOpen(true);
+                setError('');
               }}
             >
               Sign Up
@@ -131,24 +155,32 @@ export default function Dashboard() {
           </Box>
         </Paper>
 
-        <Dialog open={authOpen} onClose={() => setAuthOpen(false)}>
+        <Dialog open={authOpen} onClose={() => !loading && setAuthOpen(false)}>
           <DialogTitle>
             <Tabs value={authTab} onChange={handleAuthTabChange} centered>
-              <Tab label="Login" />
-              <Tab label="Sign Up" />
+              <Tab label="Login" disabled={loading} />
+              <Tab label="Sign Up" disabled={loading} />
             </Tabs>
           </DialogTitle>
           <DialogContent>
             <Box sx={{ p: 2, minWidth: 400 }}>
+              {error && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {error}
+                </Alert>
+              )}
+
               {authTab === 0 ? (
                 <>
                   <TextField
                     fullWidth
                     label="Email"
                     name="email"
+                    type="email"
                     value={formData.email}
                     onChange={handleInputChange}
                     margin="normal"
+                    disabled={loading}
                   />
                   <TextField
                     fullWidth
@@ -158,6 +190,7 @@ export default function Dashboard() {
                     value={formData.password}
                     onChange={handleInputChange}
                     margin="normal"
+                    disabled={loading}
                   />
                 </>
               ) : (
@@ -169,6 +202,7 @@ export default function Dashboard() {
                     value={formData.name}
                     onChange={handleInputChange}
                     margin="normal"
+                    disabled={loading}
                   />
                   <TextField
                     fullWidth
@@ -178,6 +212,7 @@ export default function Dashboard() {
                     value={formData.email}
                     onChange={handleInputChange}
                     margin="normal"
+                    disabled={loading}
                   />
                   <TextField
                     fullWidth
@@ -187,18 +222,24 @@ export default function Dashboard() {
                     value={formData.password}
                     onChange={handleInputChange}
                     margin="normal"
+                    disabled={loading}
+                    helperText="At least 6 characters"
                   />
                 </>
               )}
             </Box>
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>
-            <Button onClick={() => setAuthOpen(false)}>Cancel</Button>
-            <Button 
-              variant="contained" 
-              onClick={authTab === 0 ? handleLogin : handleSignup}
+            <Button onClick={() => setAuthOpen(false)} disabled={loading}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleAuth}
+              disabled={loading}
+              endIcon={loading ? <CircularProgress size={20} /> : null}
             >
-              {authTab === 0 ? 'Login' : 'Sign Up'}
+              {authTab === 0 ? 'Login' : 'Create Account'}
             </Button>
           </DialogActions>
         </Dialog>
@@ -206,15 +247,15 @@ export default function Dashboard() {
     );
   }
 
-  // User is authenticated - show dashboard
+  // Show dashboard for authenticated users
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" component="h1">
           Welcome Back, {currentUser.name}!
         </Typography>
-        <Button 
-          variant="outlined" 
+        <Button
+          variant="outlined"
           startIcon={<Person />}
           onClick={handleLogout}
         >
@@ -222,7 +263,6 @@ export default function Dashboard() {
         </Button>
       </Box>
 
-      {/* Rest of your dashboard content */}
       <Grid container spacing={3}>
         {/* Account Overview Card */}
         <Grid item xs={12} md={4}>
@@ -233,10 +273,14 @@ export default function Dashboard() {
             <Divider sx={{ mb: 2 }} />
             
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Avatar 
-                sx={{ width: 56, height: 56, mr: 2, bgcolor: 'primary.main' }}
-              >
-                {currentUser.name.charAt(0)}
+              <Avatar sx={{ 
+                width: 56, 
+                height: 56, 
+                mr: 2, 
+                bgcolor: 'primary.main',
+                fontSize: '1.5rem'
+              }}>
+                {currentUser.name.charAt(0).toUpperCase()}
               </Avatar>
               <Typography variant="subtitle1">{currentUser.name}</Typography>
             </Box>
@@ -252,7 +296,10 @@ export default function Dashboard() {
                 <ListItemAvatar>
                   <CalendarToday color="primary" />
                 </ListItemAvatar>
-                <ListItemText primary="Member Since" secondary={currentUser.joinDate} />
+                <ListItemText 
+                  primary="Member Since" 
+                  secondary={currentUser.joinDate} 
+                />
               </ListItem>
             </List>
           </Paper>
@@ -263,16 +310,32 @@ export default function Dashboard() {
           <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Typography variant="h6" component="h2">
-                Recent Orders
+                Recent Activity
               </Typography>
               <Button size="small" startIcon={<History />}>
-                View All
+                View History
               </Button>
             </Box>
             <Divider sx={{ my: 2 }} />
             
             <Typography variant="body1" color="text.secondary">
-              You haven't placed any orders yet.
+              {currentUser.orders?.length > 0 ? (
+                <List>
+                  {currentUser.orders.slice(0, 3).map(order => (
+                    <ListItem key={order.id}>
+                      <ListItemAvatar>
+                        <ShoppingCart color="secondary" />
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={`Order #${order.id}`}
+                        secondary={`${order.date} • $${order.amount.toFixed(2)}`}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                'No recent activity'
+              )}
             </Typography>
           </Paper>
         </Grid>
@@ -288,15 +351,15 @@ export default function Dashboard() {
             <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
               <QuickActionButton 
                 icon={<ShoppingCart />} 
-                label="View All Orders" 
+                label="View Orders" 
               />
               <QuickActionButton 
                 icon={<Edit />} 
-                label="Update Profile" 
+                label="Edit Profile" 
               />
               <QuickActionButton 
                 icon={<ContactSupport />} 
-                label="Contact Support"
+                label="Get Help"
                 color="secondary"
               />
             </Box>
