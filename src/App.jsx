@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Auth from './components/Auth';
 import Dashboard from './pages/Dashboard';
+import StoreLocator from './pages/StoreLocator'; // Import Store Locator
 import { auth } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useState, useEffect } from 'react';
@@ -45,6 +46,10 @@ function App() {
         <Route 
           path="/dashboard" 
           element={user ? <Dashboard /> : <Navigate to="/auth" />} 
+        />
+        <Route 
+          path="/store-locator" 
+          element={user ? <StoreLocator /> : <Navigate to="/auth" />} 
         />
       </Routes>
     </BrowserRouter>
